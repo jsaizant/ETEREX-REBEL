@@ -1,0 +1,10 @@
+def predict(text):
+  model_inputs = tokenizer(text, padding=True, truncation=True, return_tensors='pt')
+  outputs = model.generate(
+      model_inputs["input_ids"].to(model.device),
+      attention_mask=model_inputs["attention_mask"].to(model.device),
+      max_new_tokens=200,
+      length_penalty=1,
+      num_beams=9,
+      num_return_sequences=3)
+  return tokenizer.batch_decode(outputs)
