@@ -1,7 +1,7 @@
 # ETEREX-REBEL
 ### End-to-end Temporal Relation Extraction in the clinical domain as a sequence-to-sequence task with the REBEL framework
 
-This repository contains code for the modelling and evaluation of our BART-based model that is capable of performing end-to-end temporal relation extraction in clinical narratives as a sequence-to-sequence task
+This repository contains the code for the modelling and evaluation of our BART-based model that is capable of performing end-to-end temporal relation extraction in clinical narratives as a sequence-to-sequence task.
 
 The pre-trained model and part of the code are based on the REBEL framework (Cabot, 2021). The corpus was retrieved from the i2b2 2012 Temporal Relations Task (Sun, 2013).
 
