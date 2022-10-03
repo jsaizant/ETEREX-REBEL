@@ -9,7 +9,7 @@ The pre-trained model and part of the code are based on the REBEL framework (Cab
 
 This paper explains our work and was presented at the University of the Basque Country (UPV/ EHU) as the master thesis for the Master in Language Analysis and Processing. 
 
-[embed][TEREX_CameraReady.pdf](https://github.com/jsaizant/ETEREX-REBEL/files/9700170/TEREX_CameraReady.pdf)[/embed]
+[embed]https://github.com/jsaizant/ETEREX-REBEL/files/9700170/TEREX_CameraReady.pdf[/embed]
 
 ## Citation
 
