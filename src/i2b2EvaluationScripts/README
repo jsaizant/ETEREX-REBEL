@@ -1,0 +1,46 @@
+Readme:
+
+This evaluation script requires the following programs/language to run:
+	1. Python 2.7 or higher version
+	2. Perl and XML::Parser
+
+Usage:
+
+General
+	- Evaluate two folders example:		
+		$python i2b2Evaluation.py sampleEvaluationRecords/gold sampleEvaluationRecords/system
+	- Evaluate two files example: 
+		$python i2b2Evaluation.py sampleEvaluationRecords/gold/sample1.xml sampleEvaluationRecords/system/sample1.xml
+
+- Option group 1 - Entity selection: [-event] [-timex] [-tlink] [-all]
+	- This set of options allows you to define which entity (entities) to evaluate. The default value is [-all]. 
+	- Note: to use the [-tlink] option, please make sure that the Event/Timex IDs in the gold standard xml matches the ones in the system output xml.
+	- Evaluate two folders, events only example:
+		$python i2b2Evaluation.py -event sampleEvaluationRecords/gold sampleEvaluationRecords/system
+
+- Option group 2 - Extent match choices: [-overlap] [-exact] [-partialCredit]
+	- Use this set of options to specify the EVENT/TIMEX span match method". The default value is [-overlap]
+		- [-exact]: only precise matches are counted (normalize for spaces,punctuation and XML predefined characters)
+			e.g. "chest pain" and "her chest pain" is not a match
+		- [-overlap]: overlapping EVENT/TIMEX spans are considered as match:
+			e.g. "chest pain" and "her chest pain" is a match. 
+		- [partialCredit]: award full credit for exact matches, and half credit for overlapping matches.
+	- Evaluate exact extent span match example:
+		 $python i2b2Evaluation.py -exact sampleEvaluationRecords/gold sampleEvaluationRecords/system
+
+- Option group 3 - TLINK evaluation method selection: [--tempeval] [--oo] [--oc] [--cc]
+	- These options are used to switch between different TLINK evaluation methods. The default value is [--tempeval]
+	- [--tempeval] uses the TempEval 3 tlink evaluation method. 
+		-Precision: the total number of reduced system output TLINKs that can be verified in the gold standard closure divided by the total number of reduced system output TLINKs
+        	-Recall: the total number reduced gold standard output TLINKs that can be verified in the system closure divided by the total number of reduced gold standard output TLINKs
+	- [--oc] Original against Closure:
+        	-Precision: the total number of system output TLINKs that can be verified in the gold standard closure divided by the total number of system output TLINKs
+        	-Recall: the total number gold standard output TLINKs that can be verified in the system closure divided by the total number of gold standard output TLINKs
+  	- [--oo]: Original against Original:
+        	-Precision: the total number of system output TLINKs that can be verified in the gold standard output divided by the total number of system output TLINKs
+        -Recall: the total number gold standard output TLINKs that can be verified in the system output divided by the total number of gold standard output TLINKs  
+  	- [--cc]: Closure against Closure:
+        	-Precision: the total number of system closure TLINKs that can be verified in the gold standard closure divided by the total number of system output TLINKs
+        	-Recall: the total number gold standard closure TLINKs that can be verified in the system closure divided by the total number of gold standard TLINKs  
+
+
