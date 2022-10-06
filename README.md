@@ -11,9 +11,12 @@ This paper explains our work and was presented at the University of the Basque C
 
 [TEREX_CameraReady.pdf](https://github.com/jsaizant/ETEREX-REBEL/files/9700191/TEREX_CameraReady.pdf)
 
-
 ## Citation
 
 Huguet Cabot, P.-L., & Navigli, R. (2021). REBEL: Relation Extraction By End-to-end Language generation. Findings of the Association for Computational Linguistics: EMNLP 2021, 2370–2381. doi: https://doi.org/10.18653/v1/2021.findings-emnlp.204
 
 Sun, W., Rumshisky, A., & Uzuner, O. (2013). Evaluating temporal relations in clinical text: 2012 i2b2 Challenge. In Journal of the American Medical Informatics Association (Vol. 20, Issue 5, pp. 806–813). Oxford University Press (OUP). https://doi.org/10.1136/amiajnl-2013-001628
+
+## License
+
+ETEREX-REBEL is licensed under the CC BY-SA-NC 4.0 license. The text of the license can be found [here](https://github.com/jsaizant/ETEREX-REBEL/blob/main/LICENSE.md)
