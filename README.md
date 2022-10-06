@@ -19,4 +19,4 @@ Sun, W., Rumshisky, A., & Uzuner, O. (2013). Evaluating temporal relations in cl
 
 ## License
 
-ETEREX-REBEL is licensed under the CC BY-SA-NC 4.0 license. The text of the license can be found [here](https://github.com/jsaizant/ETEREX-REBEL/blob/main/LICENSE.md)
+ETEREX-REBEL is licensed under the CC BY-SA-NC 4.0 license. The text of the license can be found [here](https://github.com/jsaizant/ETEREX-REBEL/blob/main/LICENSE.md).
