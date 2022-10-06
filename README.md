@@ -3,7 +3,7 @@
 
 This repository contains the code for the modelling and evaluation of our BART-based model that is capable of performing end-to-end temporal relation extraction in clinical narratives as a sequence-to-sequence task.
 
-The pre-trained model and part of the code are based on the REBEL framework (Cabot, 2021). The corpus was retrieved from the i2b2 2012 Temporal Relations Task (Sun, 2013).
+The pre-trained model and part of the code are based on the REBEL framework (Cabot, 2021). The corpus was retrieved from the i2b2 2012 Temporal Relation Task (Sun, 2013).
 
 ## Paper
 
