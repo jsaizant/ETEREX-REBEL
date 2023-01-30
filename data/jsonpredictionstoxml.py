@@ -1,3 +1,5 @@
+# Install
+!pip install ijson
 # Import
 import os
 import json, ijson
@@ -11,18 +13,25 @@ def loadXML(filePath):
   """A function to parse XML files.
   """
   # Set Error Recovery parser because default XMLParser gives error
-  parser = etree.XMLParser(recover=True, strip_cdata=False)
+  parser = etree.XMLParser(recover=True)
   # Create XML tree from file
   tree = ET.parse(filePath, parser = parser)
-  return tree
+  # Get the root
+  root = tree.getroot()
+  return root
 
-def readXML(filePath): 
-  # Open and load XML file
-  docm = loadXML(filePath)
-  # ROOT contains TEXT (Index 0) and TAGS (Index 1) nodes
-  root = docm.getroot()
+def readXML(filePath):
+  root = loadXML(filePath)
+  # Get the text of the root element and the tags
   text = root[0].text
   tags = root[1]
+  return text, tags
+
+def emptyXML(filePath, elementList):
+  # Open and load XML file
+  root = loadXML(filePath)
+  # Remove the specified elements from the tree
+  etree.strip_elements(root, elementList)
   return root
 
 def saveJSONL(fPath, f):
@@ -38,151 +47,131 @@ def readJSONL(fpath):
         l.append(d)
     return l
 
-token2label = {
-    # EVENT
-    '<prob>':'PROBLEM', '<test>':'TEST', '<tret>':'TREATMENT', '<dept>':'CLINICAL_DEPT', '<evid>':'EVIDENTIAL', '<occr>':'OCCURRENCE', 
-    # TIMEX3
-    '<date>':'DATE', '<time>':'TIME', '<durt>':'DURATION', '<freq>':'FREQUENCY'}
-    # TLINK
-    #'follows':'AFTER', 'followed by':'BEFORE', 'said to be the same as':'OVERLAP'}
+# Set file paths
+dataDir = "/content/drive/MyDrive/Colab/ClinicalREBEL/data/"
+modelDir = "/content/drive/MyDrive/Colab/ClinicalREBEL/model/"
+predJsonPath = dataDir + "TestPreds.json"
+testPath = dataDir + "TestSet_MergedTLINK/"
+predPath = dataDir + "system_dir/"
+evalPath= dataDir + "TemporalEvaluationScripts/"
+
+predList = readJSONL(predJsonPath)
+testList = os.listdir(testPath)
 
 type2label = {
     # EVENT
     'PROBLEM':'EVENT', 'TEST':'EVENT', 'TREATMENT':'EVENT', 'CLINICAL_DEPT':'EVENT', 'EVIDENTIAL':'EVENT', 'OCCURRENCE':'EVENT', 
     # TIMEX3
-    'DATE':'TIMEX3', 'TIME':'TIMEX3', 'DURATION':'TIMEX3', 'FREQUENCY':'TIMEX3',
-    # TLINK
-    'follows':'AFTER', 'followed by':'BEFORE', 'said to be the same as':'OVERLAP'}
+    'DATE':'TIMEX3', 'TIME':'TIMEX3', 'DURATION':'TIMEX3', 'FREQUENCY':'TIMEX3'}
 
-def extract_triplets_typed(text, mapping_types=token2label):
-    triplets = []
-    relation = ''
-    text = text.strip()
-    current = 'x'
-    subject, relation, object_, object_type, subject_type = '','','','',''
-
-    for token in text.replace("<s>", "").replace("<pad>", "").replace("</s>", "").split():
-        if token == "<triplet>":
-            current = 't'
-            if relation != '':
-                triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
-                relation = ''
-            subject = ''
-        elif token in mapping_types:
-            if current == 't' or current == 'o':
-                current = 's'
-                if relation != '':
-                    triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
-                object_ = ''
-                subject_type = mapping_types[token]
-            else:
-                current = 'o'
-                object_type = mapping_types[token]
-                relation = ''
-        else:
-            if current == 't':
-                subject += ' ' + token
-            elif current == 's':
-                object_ += ' ' + token
-            elif current == 'o':
-                relation += ' ' + token
-    if subject != '' and relation != '' and object_ != '' and object_type != '' and subject_type != '':
-        triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
-    return triplets
-
-jsonlPath = '/Users/josejaviersaizanton/Documents/TFM_local/data/raw_preds/testpreds_beam123.json'
-testPath = '/Users/josejaviersaizanton/Documents/TFM_local/data/test_Merged/'
-predPath = '/Users/josejaviersaizanton/Documents/TFM_local/data/xml_preds/'
-predList = readJSONL(jsonlPath)
-testList = [fileName for fileName in os.listdir(testPath) if '.xml' in fileName]
-tagGoldcount, tagPredcount = 0, 0
-
+gold_count, pred_count = 0, 0
 for fileName in testList:
+    inPath, outPath = testPath + fileName, predPath + fileName
     # Read XMLs
     print(fileName)
-    inPath, outPath = testPath + fileName, predPath + fileName
-    rootTruth, rootPred = readXML(inPath), readXML(inPath)
-    textGold, tagsGold, tagsPred = rootTruth[0].text, rootTruth[1], rootPred[1]
-    etree.strip_elements(rootPred, ['EVENT', 'TIMEX3', 'TLINK', 'SECTIME'])
-    parser = etree.XMLParser(encoding='UTF-8', strip_cdata=False)
-    tagGoldcount += len(tagsGold)
+    textGold, tagsGold = readXML(inPath)
+    rootPred = emptyXML(inPath, ['EVENT', 'TIMEX3', 'TLINK', 'SECTIME'])
+    tagsPred = rootPred[1]
+    gold_count += len(tagsGold)
+
+
     # Iterate over predictions that match the document
-    entityList = []
-    for pred in predList:
-        if pred['docidx']+'.xml' == fileName:
-            triplet = pred['triplet']
-            if triplet['head'] in textGold and triplet['head'] != '' and triplet['tail'] in textGold and triplet['tail'] != '' and triplet['type'] in type2label:
-                # head
-                hlabel, hspan, htext, htype, hpol = type2label[triplet['head_type']], next(re.compile(re.escape(triplet['head'])).finditer(textGold)).span(), triplet['head'].replace('&','&amp;').replace('<','&lt;'), triplet['head_type'], random.choice(['NEG', 'POS'])
-                # tail
-                tlabel, tspan, ttext, ttype, tpol = type2label[triplet['tail_type']], next(re.compile(re.escape(triplet['tail'])).finditer(textGold)).span(), triplet['tail'].replace('&', '&amp;').replace('<','&lt;'), triplet['tail_type'], random.choice(['NEG', 'POS'])        
-                if triplet['head'] in entityList: continue
-                elif triplet['tail'] not in entityList:
-                    entityList.append(triplet['head'])
-                    if hlabel == 'EVENT':
-                        hstring = f'<{hlabel} id="" start="{hspan[0]}" end="{hspan[1]}" text="{htext}" modality="FACTUAL" polarity="{hpol}" type="{htype}" />'
-                        helement = etree.fromstring(hstring, parser)
-                        helement.tail = '\n'
-                        tagsPred.append(helement)
-                    if hlabel == 'TIMEX3':
-                        hstring = f'<{hlabel} id="" start="{hspan[0]}" end="{hspan[1]}" text="{htext}" type="{htype}" val="" mod="NA" />'
-                        helement = etree.fromstring(hstring, parser)
-                        helement.tail = '\n'
-                        tagsPred.append(helement)
-                if triplet['tail'] in entityList: continue
-                elif triplet['tail'] not in entityList:
-                    entityList.append(triplet['tail'])
-                    if tlabel == 'EVENT':
-                        tstring = f'<{tlabel} id="" start="{tspan[0]}" end="{tspan[1]}" text="{ttext}" modality="FACTUAL" polarity="{tpol}" type="{ttype}" />'
-                        telement = etree.fromstring(tstring, parser)
-                        telement.tail = '\n'
-                        tagsPred.append(telement)
-                    if tlabel == 'TIMEX3':
-                        tstring = f'<{tlabel} id="" start="{tspan[0]}" end="{tspan[1]}" text="{ttext}" type="{ttype}" val="" mod="NA" />'
-                        telement = etree.fromstring(tstring, parser)
-                        telement.tail = '\n'
-                        tagsPred.append(telement)
-                # relation
-                rtype = type2label[triplet['type']]
-                rstring = f'<TLINK id="" fromID="" fromText="{htext}" toID="" toText="{ttext}" type="{rtype}" />'
-                relement = etree.fromstring(rstring, parser)
-                relement.tail = '\n'
-                tagsPred.append(relement)
+    entity_list = set()
+    element_list = []
+    for prediction in predList:
+        if prediction['docidx']+'.xml' == fileName:
+            triplet = prediction['triplet']
+            if triplet['head'] in textGold and triplet['head'] != '' and triplet['tail'] in textGold and triplet['tail'] != '':
+              # compile head entity into XML element
+              hlabel = type2label[triplet['head_type']]
+              hstart = textGold.find(triplet['head'])
+              hend = textGold.find(triplet['head']) + len(triplet['head'])
+              htext = triplet['head'].replace('&','&amp;').replace('<','&lt;')
+              htype = triplet['head_type']
+              if hlabel == 'EVENT':
+                helement = etree.Element(hlabel, id="", start=str(hstart), end=str(hend), text=htext, modality="", polarity="", **{'type': htype})
+                helement.tail = '\n'
+              if hlabel == 'TIMEX3':
+                helement = etree.Element(hlabel, id="", start=str(hstart), end=str(hend), text=htext, **{'type': ttype}, val="", mod="")
+                helement.tail = '\n'
+
+              # compile tail entity into XML element
+              tlabel = type2label[triplet['tail_type']]
+              tstart = textGold.find(triplet['tail'])
+              tend = textGold.find(triplet['tail']) + len(triplet['tail'])
+              ttext = triplet['tail'].replace('&', '&amp;').replace('<','&lt;')
+              ttype = triplet['tail_type']
+              if tlabel == 'EVENT':
+                telement = etree.Element(tlabel, id="", start=str(tstart), end=str(tend), text=ttext, modality="", polarity="", **{'type': ttype})
+                telement.tail = '\n'
+              if tlabel == 'TIMEX3':
+                telement = etree.Element(tlabel, id="", start=str(tstart), end=str(tend), text=ttext, **{'type': ttype}, val="", mod="")
+                telement.tail = '\n'
+                
+              # compile relation into XML element
+              rtype = triplet['type']
+              relement = etree.Element("TLINK", id="", fromID="", fromText=htext, toID="", toText=ttext)
+              relement.set("type", rtype)
+              relement.tail = '\n'
+
+              # append if not already included
+              if htext not in entity_list:
+                  entity_list.add(htext)
+                  tagsPred.append(helement)
+              if ttext not in entity_list:
+                  entity_list.add(ttext)
+                  tagsPred.append(telement)
+              
+              tagsPred.append(relement)
+
             else:continue
         else:continue
-    # Modify file
+    
+    pred_count += len(tagsPred)
+    
+    # Sort EVENT and TIMEX3 tags by start character
     tagsPred[:] = sorted(tagsPred, key = lambda x : int(x.get('start')) if x.tag != 'TLINK' else False)
-    tagsPred[:] = sorted(tagsPred, key = lambda x : x.tag)
+    # Assign IDs
     ide, idt, idr = 0, 0, 0
-    for tagP in tagsPred:
-        # if tagP.tag != 'TLINK':
-        #     for tagG in tagsGold:
-        #         if tagG.tag == 'EVENT' or tagG.tag == 'TIMEX3':
-        #             if int(tagP.attrib['start']) == int(tagG.attrib['start']) and int(tagP.attrib['end']) == int(tagG.attrib['end']):
-        #                 tagP.attrib['id'] = tagG.attrib['id']       
-        #             else: continue
-        if tagP.attrib['id'] == '':
-            if tagP.tag == 'EVENT':
-                tagP.attrib['id'] = f'E{ide}'
-                ide += 1
-            if tagP.tag == 'TIMEX3':
-                tagP.attrib['id'] = f'T{idt}'
-                idt += 1                
-        if tagP.tag == 'TLINK':
-            tagP.attrib['id'] = f'TL{idr}'
-            tagP.attrib['fromID'] = tagsPred.xpath('.//*[contains(@text, "{}")]'.format(tagP.attrib['fromText']))[0].attrib['id']
-            tagP.attrib['toID'] = tagsPred.xpath('.//*[contains(@text, "{}")]'.format(tagP.attrib['toText']))[0].attrib['id']
-            idr += 1
-    tagsPred[:] = sorted(tagsPred, key = lambda x : int(x.get('id').replace('TL', '')) if x.tag == 'TLINK' else False)
-    tagPredcount += len(tagsPred)
-    # Write file
-    rootPred = etree.ElementTree(rootPred, parser=parser)
-    with open(outPath, "wb") as file:
-        rootPred.write(file)
+    for tag in tagsPred:
+        if tag.attrib['id'] == '':
+          if tag.tag == 'EVENT':
+            tag.attrib['id'] = f'E{ide}'
+            ide += 1
+          if tag.tag == 'TIMEX3':
+            tag.attrib['id'] = f'T{idt}'
+            idt += 1 
+          else:continue
+        else: continue          
+    for tag in tagsPred:
+      if tag.attrib['id'] == '':
+        if tag.tag == 'TLINK':
+          tag.attrib['id'] = f'TL{idr}'
+          tag.attrib['fromID'] = tagsPred.xpath('.//*[contains(@text, "{}")]'.format(tag.attrib['fromText']))[0].attrib['id']
+          tag.attrib['toID'] = tagsPred.xpath('.//*[contains(@text, "{}")]'.format(tag.attrib['toText']))[0].attrib['id']
+          idr += 1
+        else:continue
+      else: continue
 
-if '.DS_Store' in os.listdir(testPath):
-    os.remove(testPath + '.DS_Store')
-if '.DS_Store' in os.listdir(predPath):
-    os.remove(predPath + '.DS_Store')
+    # Find admission and discharge dates
+    admission_date = tagsPred.xpath('//TIMEX3[@id="T0"]/@text')[0]
+    discharge_date = tagsPred.xpath('//TIMEX3[@id="T1"]/@text')[0]
+    idr = 0
+    for tag in tagsPred:
+      if tag.tag == 'TLINK':
+        if tag.attrib['toID'] in ["T1", "T0"] and tag.attrib['fromText'].lower() not in ["admission", "discharge"]:
+          tag.attrib['id'] = f'SECTIME{idr}'
+          idr += 1
+        else: continue
+      else: continue
+    
+    # Separate EVENT and TIMEX3 tags by name
+    tagsPred[:] = sorted(tagsPred, key = lambda x : x.get('id'))
+    #etree.dump(tagsPred)
 
-print(f'Number of predictions: {tagPredcount}. Number of original tags: {tagGoldcount}')
+    # Write XML
+    treeOut = etree.tostring(rootPred, encoding='UTF-8', pretty_print=True, xml_declaration=True)
+    with open(outPath, 'w') as f:
+        f.write(treeOut.decode())
+
+print(f'Total count: {gold_count} standard tags. {pred_count} predicted tags.')
