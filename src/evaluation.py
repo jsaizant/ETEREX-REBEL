@@ -13,87 +13,121 @@ import numpy as np
 from lxml import etree
 import xml.etree.ElementTree as ET
 import re
+import tensorflow as tf
 
 # Set file paths
-dataDir = "/content/drive/MyDrive/Colab Notebooks/timexes_thesis/data/"
-modelDir = "/content/drive/MyDrive/Colab Notebooks/timexes_thesis/model/"
-trainPath = dataDir + "train_Merged/"
-testPath = dataDir + "test_Merged/"
+dataDir = "/content/drive/MyDrive/Colab Notebooks/Thesis Model/data/"
+modelDir = "/content/drive/MyDrive/Colab Notebooks/Thesis Model/model/"
+trainJsonPath = dataDir + "TrainJson_MergedTLINK.json"
+testJsonPath = dataDir + "TestJson_MergedTLINK.json"
+predJsonPath = dataDir + "TestPreds.json"
+trainPath = dataDir + "TrainSet_MergedTLINK/"
+testPath = dataDir + "TestSet_MergedTLINK/"
 
-# Load fine-tuned model
+# Local model
 tokenizer = AutoTokenizer.from_pretrained(modelDir)
 model = AutoModelForSeq2SeqLM.from_pretrained(modelDir)
 
-type2abbr = {# EVENT
-             "PROBLEM": "<prob>",
-             "TEST": "<test>",
-             "TREATMENT": "<tret>",
-             "CLINICAL_DEPT": "<dept>",
-             "EVIDENTIAL": "<evid>",
-             "OCCURRENCE": "<occr>",
-             # TIMEX3
-             "DATE": "<date>",
-             "TIME": "<time>",
-             "DURATION": "<durt>",
-             "FREQUENCY": "<freq>",
-             # TLINK
-             "AFTER": "follows",
-             "BEFORE": "followed by"
-             "OVERLAP": "said to be the same as"} # "partially coincident with"
+token2label = {
+    # EVENT
+    '<prob>':'PROBLEM', '<test>':'TEST', '<tret>':'TREATMENT', '<dept>':'CLINICAL_DEPT', '<evid>':'EVIDENTIAL', '<occr>':'OCCURRENCE', 
+    # TIMEX3
+    '<date>':'DATE', '<time>':'TIME', '<durt>':'DURATION', '<freq>':'FREQUENCY'}
+type2label = {
+    # EVENT
+    'PROBLEM':'EVENT', 'TEST':'EVENT', 'TREATMENT':'EVENT', 'CLINICAL_DEPT':'EVENT', 'EVIDENTIAL':'EVENT', 'OCCURRENCE':'EVENT', 
+    # TIMEX3
+    'DATE':'TIMEX3', 'TIME':'TIMEX3', 'DURATION':'TIMEX3', 'FREQUENCY':'TIMEX3',
+    # TLINK
+    'follows':'AFTER', 'followed by':'BEFORE', 'same as':'OVERLAP'}
 
 def loadXML(filePath):
-  """A function to parse XML files.
-  """
-  # Set Error Recovery parser because default XMLParser gives error
-  parser = etree.XMLParser(recover=True)
-  # Create XML tree from file
-  tree = ET.parse(filePath, parser = parser)
-  return tree
+    """A function to parse XML files.
+    """
+    # Set Error Recovery parser because default XMLParser gives error
+    parser = etree.XMLParser(recover=True)
+    # Create XML tree from file
+    tree = ET.parse(filePath, parser = parser)
+    # ROOT contains TEXT (Index 0) and TAGS (Index 1) nodes
+    root = tree.getroot()
+    text = root[0].text
+    tags = root[1]
+    return text, tags
+
+def add_header(header, string):
+  # Create a new string to store the modified string
+  modified_string = ''
+  # Check if the header is not already in the string
+  if header not in string:
+    # If the header is not in the string, add it to the beginning of the string
+    modified_string = header + ' ' + string
+  else:
+    # If the header is already in the string, leave the string unchanged
+    modified_string = string
+  return modified_string
 
 def readXML(filePath): 
   # Open and load XML file
-  docm = loadXML(filePath)
-  # ROOT contains TEXT (Index 0) and TAGS (Index 1) nodes
-  root = docm.getroot()
-  text = root[0].text
-  tags = root[1]
+  text, tags = loadXML(filePath)
+  # Identify header dates
+  header = ' '.join(text.strip().splitlines()[0:4])
   # Get sentences
-  #sentenceList = tokenize.sent_tokenize(text)
-  sents = text.split("\n")
-  sentList = []
-  for idx, sent in enumerate(sents):
-    if len(sent) == 0: continue
-    if ':' in sent: sentList.append(sent+' '+sents[idx+1])
-    elif sentList != [] and ':' not in sents[idx-1]: sentList.append(sent)
-  sentenceList = []
-  for idx, sent in enumerate(sentList):
-    sentenceList.append(sent)
-    if idx != len(sentList)-1:
-      sentenceList.append(sent+' '+sentList[idx+1])
-  return sentenceList
+  text = text.strip().splitlines()[4:]
+  textSplit = []
+  # Merge lines with ':' together in textSplit
+  for id, sent in enumerate(text):
+    if ':' in sent and sent != text[-1]: textSplit.append(" ".join([sent+" "+text[id+1]]).strip())
+    elif textSplit != [] and ":" not in text[id-1]: textSplit.append(sent)
+    else: continue 
 
-# For conditional beam search: Forces one of the list words to appear // Gives corrupt relation types
-# force_flexible = ["follows", "followed by", "said to be the same as"]
-# force_words_ids = [tokenizer(force_flexible, add_special_tokens=False).input_ids]
+  # THE FOLLOWING ARE DIFFERENT METHODS OF SPLITTING EACH DOCUMENT IN THE
+  # TEST SET: CHOOSE ONLY ONE IN RETURN BY CHANGING THE LIST
+  
+  # 1. Merge sentence list into the following patron: 1, 1-2, 2, 2-3, 3, 3-4, etc.
+  # singleList = []
+  # for id, sent in enumerate(textSplit):
+  #   singleList.append(sent)
+  #   if id != len(textSplit)-1:
+  #     singleList.append(sent+' '+textSplit[id+1])
+  #   else: continue
 
-# For grouped beam search use: // Predicts bad types on short context sentences
-# num_beam_groups = 2 (equal or less to output sentences)
-# diverse_penalty = float(10)
+  # 2. Merge sentence list into the following patron: 1-2, 3-4, 5-6, 7-8, etc.
+  #doubleList = [ " ".join(sent) for sent in zip(textSplit[0::2], textSplit[1::2]) ]
 
-# https://huggingface.co/transformers/v4.8.0/main_classes/configuration.html
+  # 3. Merge sentence list into the following patron: 1-2-3, 2-3-4, 3-4-5, etc.
+  tripleList = []
+  for id, sent in enumerate(textSplit):
+    threesent = ""
+    if id < len(textSplit) - 2:
+      for n in range(3): # Sent. 0 + Sent. 1 + Sent. 2 + Sent. 3 
+        threesent += " " + textSplit[id+n]
+      tripleList.append(add_header(header, threesent))
+    elif id == len(textSplit) - 2: 
+      for n in range(2): # Sent. 0 + Sent. 1 + Sent. 2
+        threesent += " " + textSplit[id+n]
+      tripleList.append(add_header(header, threesent))
+    else: break
 
-def predict(text):
+  # 4. By character count
+  # minLength = 12
+  # maxLength = 128
+  # # Remove breaklines for accurate character splitting
+  # text = text.replace("\n", " ")
+  # # Get context list from file
+  # contextList = [add_header(header, context.group(0)).strip() for context in re.finditer(f".{{{minLength},{maxLength}}}", text)]
+  return tripleList
+
+def predict(text): # https://huggingface.co/transformers/v4.8.0/main_classes/configuration.html
+  gen_kwargs = {
+    "max_length": 1024,
+    "length_penalty": 0,
+    "num_beams": 3,
+    "num_return_sequences": 1}
   model_inputs = tokenizer(text, padding=True, truncation=True, return_tensors='pt')
   outputs = model.generate(
-      model_inputs["input_ids"].to(model.device),
-      attention_mask=model_inputs["attention_mask"].to(model.device),
-      max_new_tokens=1024,
-      length_penalty=4.0,
-      num_beam_groups=4,
-      early_stopping=8,
-      diversity_penalty=4.0,
-      num_beams=12,
-      num_return_sequences=4)
+    model_inputs["input_ids"].to(model.device),
+    attention_mask=model_inputs["attention_mask"].to(model.device),
+    **gen_kwargs)
   return tokenizer.batch_decode(outputs)
 
 def saveJSONL(fPath, f):
@@ -109,7 +143,7 @@ def readJSONL(fpath):
         l.append(d)
     return l
 
-def extract_triplets_typed(text, mapping_types= {'<prob>':'PROBLEM', '<test>':'TEST', '<tret>':'TREATMENT', '<dept>':'CLINICAL_DEPT', '<evid>':'EVIDENTIAL', '<occr>':'OCCURRENCE', '<date>':'DATE', '<time>':'TIME', '<durt>':'DURATION', '<freq>':'FREQUENCY'}):
+def extract_triplets_typed(text, mapping_types= token2label):
     triplets = []
     relation = ''
     text = text.strip()
@@ -119,15 +153,15 @@ def extract_triplets_typed(text, mapping_types= {'<prob>':'PROBLEM', '<test>':'T
     for token in text.replace("<s>", "").replace("<pad>", "").replace("</s>", "").split():
         if token == "<triplet>":
             current = 't'
-            if relation != '':
-                triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
+            if relation != '' and relation.strip() in type2label:
+                triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': type2label[relation.strip()],'tail': object_.strip(), 'tail_type': object_type})
                 relation = ''
             subject = ''
         elif token in mapping_types:
             if current == 't' or current == 'o':
                 current = 's'
-                if relation != '':
-                    triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
+                if relation != '' and relation.strip() in type2label:
+                    triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': type2label[relation.strip()],'tail': object_.strip(), 'tail_type': object_type})
                 object_ = ''
                 subject_type = mapping_types[token]
             else:
@@ -141,19 +175,36 @@ def extract_triplets_typed(text, mapping_types= {'<prob>':'PROBLEM', '<test>':'T
                 object_ += ' ' + token
             elif current == 'o':
                 relation += ' ' + token
-    if subject != '' and relation != '' and object_ != '' and object_type != '' and subject_type != '':
-        triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': relation.strip(),'tail': object_.strip(), 'tail_type': object_type})
+    if subject != '' and relation != '' and object_ != '' and object_type != '' and subject_type != '' and relation.strip() in type2label:
+        triplets.append({'head': subject.strip(), 'head_type': subject_type, 'type': type2label[relation.strip()],'tail': object_.strip(), 'tail_type': object_type})
     return triplets
 
-# Set devie to CUDA and check if connected
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 model.to(device)
 next(model.parameters()).is_cuda
+
+# Generate predictions for one file:
+count = 0
+testpred = []
+fil = testPath + "206.xml"
+sentenceList = readXML(fil)
+# Iterate over sentences
+for sent in sentenceList:
+  print(sent)
+  # Iterate over predictions of the same sentence
+  prediction = [extract_triplets_typed(pred) for pred in predict(sent)]
+  # Iterate over the triplets of the same sentence
+  for tripletList in prediction:
+    for triplet in tripletList:
+      print(triplet)
+      count += 1
+print(f"Amount of triplets predicted:{count}")
 
 # Generate predictions, decode and put into list
 testpred = []
 testList = os.listdir(testPath)
 for idx, f in enumerate(testList):
+  pairList = []
   filePath = testPath + f
   sentenceList = readXML(filePath)
   # Get document ID   
@@ -161,22 +212,17 @@ for idx, f in enumerate(testList):
   # Iterate over sentences
   for sent in sentenceList:
     # Iterate over predictions of the same sentence
-    tripletList = [extract_triplets_typed(pred) for pred in predict(sent)]
-    if tripletList != []:
+    prediction = [extract_triplets_typed(pred) for pred in predict(sent)]
+    if prediction != []:
       # Iterate over the triplets of the same sentence
-      for triplet in tripletList:
-        preddict = {'docidx':docID, 'triplet':triplet}
-        testpred.append(preddict)
+      for tripletList in prediction:
+        for triplet in tripletList:
+          pair = (triplet['head'], triplet['tail'])
+          if pair not in pairList:
+            preddict = {'docidx':docID, 'triplet':triplet}
+            testpred.append(preddict)
+            pairList.append(pair)
+          else: continue
+  print(f'Document {idx+1}/{len(testList)} ({f}) tested. Prediction example for "{sent}" are:\n{tripletList}')
 
-# Remove repeated triplets
-seenSet = set()
-testpred_trimmed = []
-for dct in testpred:
-  for trl in dct['triplet']:
-    t = tuple(trl.items())
-    if t not in seenSet:
-        seenSet.add(t)
-        testpred_trimmed.append({'docidx':dct['docidx'], 'triplet':trl})
-
-# Save predictions
-saveJSONL(predjsonPath, predList)
+saveJSONL(predJsonPath, testpred)
