@@ -1,20 +1,11 @@
-# Install
-!pip install torch
-!pip install transformers
-!pip install datasets
 # Import data libraries
 import os
+import json
 import xml.etree.ElementTree as ET
 from lxml import etree
 import numpy as np
 import re
-import json, ijson
 from operator import itemgetter
-# Pytorch/ Transformers
-from transformers import AutoConfig, AutoTokenizer, AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq, Seq2SeqTrainingArguments, Seq2SeqTrainer, pipeline
-from datasets import Dataset, load_metric
-import torch
-from torch.utils.data import DataLoader
 
 class i2b2Dataset(object):
   """A class to handle the i2b2 2012 Temporal Relations dataset.
@@ -29,24 +20,12 @@ class i2b2Dataset(object):
   def __init__(self, dirPath: str, *args, **kwargs) -> None:
     """Initialize the dataset.
     """
-    # Initialize parent
+    # Initialize parent function
     super(i2b2Dataset, self).__init__(*args, **kwargs)
-    # Set directory path
+    # Set global directory path
     self.dirPath = dirPath
-    # Get file list
+    # Get global file list
     self.fileList = os.listdir(dirPath)
-    # Load labels and triplets
-    self.dictList = self.loadTriplets()
-  
-  def __len__(self):
-    """Returns the length of the dataset.
-    """
-    return len(self.triplets)
-
-  def __getitem__(self, index):
-    """Returns the item at the given index.
-    """
-    return self.dictList[index]
 
   def loadXML(self, filePath):
     """A function to parse XML files.
@@ -55,9 +34,13 @@ class i2b2Dataset(object):
     parser = etree.XMLParser(recover=True)
     # Create XML tree from file
     tree = ET.parse(filePath, parser = parser)
-    return tree
+    # ROOT contains TEXT (Index 0) and TAGS (Index 1) nodes
+    root = tree.getroot()
+    text = root[0].text
+    tags = root[1]
+    return text, tags
 
-  def loadCorpus(self, f):
+  def loadFile(self, filePath):
     """A function to obtain a list of entities and relations from the i2b2 2012 Temporal Relations dataset.      
     """
     # Set dictionary abbreviations
@@ -76,134 +59,168 @@ class i2b2Dataset(object):
                  # TLINK
                  "AFTER": "follows",
                  "BEFORE": "followed by",
-                 "OVERLAP": "said to be the same as"} # "partially coincident with"
-
-    # Get document ID
-    docID = f.replace(".xml","")
+                 "OVERLAP": "same as"} # "partially coincident with"
     # Open and load XML file
-    filePath = self.dirPath + f
-    docm = self.loadXML(filePath)
+    text, tags = self.loadXML(filePath)
     # Create list to store dictionaries with relation instances
     instanceList = []
-    # ROOT contains TEXT (Index 0) and TAGS (Index 1) nodes
-    root = docm.getroot()
-    text = root[0].text
-    tags = root[1]
     # Get entities and relations separately
-    entityList = []
-    relationList = []
+    eventList = []
+    tlinkList = []
     for element in tags:
       if element.attrib["type"] == "": continue # Ommit if type attribute is blank
-      elif element.tag != "TLINK" and element.tag != "SECTIME": # Add if tag is EVENT, TIMEX3
-        entityList.append({"id":element.attrib["id"],
-                           "text":element.attrib["text"],
-                           "start":int(element.attrib["start"]), 
-                           "end":int(element.attrib["end"]),
-                           "tag":element.tag, 
-                           "type":type2abbr[element.attrib["type"]]})
-      elif element.tag == "TLINK" and "TL" in element.attrib["id"]: # Add if tag is TLINK but is not related with SECTIME
-        relationList.append({"id":element.attrib["id"], 
-                             "fromID":element.attrib["fromID"], 
-                             "fromText":element.attrib["fromText"],
-                             "toText":element.attrib["toText"],
-                             "toID":element.attrib["toID"],
-                             "type":type2abbr[element.attrib["type"]]})
+      if element.tag == "EVENT" or element.tag == "TIMEX3": # Add if tag is EVENT or TIMEX3
+        eventList.append({"id":element.attrib["id"],
+                          "text":element.attrib["text"],
+                          "start":int(element.attrib["start"]), 
+                          "end":int(element.attrib["end"]),
+                          "tag":element.tag, 
+                          "type":type2abbr[element.attrib["type"]]})
+      if element.tag == "TLINK": # and "TL" in element.attrib["id"] (If tag is TLINK but is not related with SECTIME)
+        tlinkList.append({"id":element.attrib["id"],
+                          "tlinktype": ''.join(filter(lambda x: not x.isdigit(), element.attrib["id"])).strip(), # Capture if its normal TL or SECTIME 
+                          "fromID":element.attrib["fromID"], 
+                          "fromText":element.attrib["fromText"],
+                          "toText":element.attrib["toText"],
+                          "toID":element.attrib["toID"],
+                          "reltype":type2abbr[element.attrib["type"]]})
       else: continue
-      # Sort list by appearance order
-      entityList = sorted(entityList, key=lambda ent: ent['start']) 
-    return entityList, relationList
+    # Sort list by appearance order
+    eventList = sorted(eventList, key=lambda ent: ent['start']) 
+    return eventList, tlinkList
   
-  def extractTriplet(self, headEnt, tailEntList):
-    """A function to parse a given text and extract the triplets.
+  def extractTripletSequence(self, dataList):
+    """A function to parse a triplet sequence given a a list of head entities and tail entities.
+       For example: '<triplet> head <subj> tail <obj> relation <subj> tail <obj> relation'
     """
-    # Start triplet
-    triplets = f"<triplet> {headEnt['text']} "
-    # Go through the tail entity list
-    for tailEnt in tailEntList:
-      triplets += f"<{headEnt['type']}> {tailEnt['text']} <{tailEnt['enttype']}> {tailEnt['reltype']} " # triplets += <subj> + o + <obj> + r
+    tripletSeq = ""
+    for triplet in dataList:
+      # Start triplet
+      head = triplet['head']
+      tripletSeq += f"<triplet> {head['text']} "
+      # Go through the tail entity list
+      for tail in triplet['tail']:
+        tripletSeq += f"<{head['type']}> {tail['text']} <{tail['enttype']}> {tail['reltype']} " # triplets += <subj> + o + <obj> + r
+    
+    return tripletSeq
 
-    return triplets
+  def add_header(self, header, string):
+    # Create a new string to store the modified string
+    modified_string = ''
+    # Check if the header is not already in the string
+    if header not in string:
+      # If the header is not in the string, add it to the beginning of the string
+      modified_string = header + ' ' + string
+    else:
+      # If the header is already in the string, leave the string unchanged
+      modified_string = string
+    return modified_string
 
-  def loadTriplets(self):
+  def loadDict(self):
+    # Set minimum and maximum length for context instances
+    minLength = 0
+    maxLength = 512
+    dataDict = []
+    lengthList = []
+
     # Iterate over input directory files
-    dictList = []
-    for f in self.fileList:
-      text = self.loadXML(self.dirPath + f).getroot()[0].text
-      entityList, relationList = self.loadCorpus(f)
-      sentenceList = [{"text":sent.group(0), "start":sent.start(), "end":sent.end()} for sent in re.finditer("[^\r\n]+", text)]
-      headIDList = list(set([relation['fromID'] for relation in relationList]))
-      headEntList = [ent for id in headIDList for ent in entityList if ent['id'] in headIDList]
-      # Iterate over head entities
-      for headEnt in headEntList:
-        limitList = [int(headEnt['start'])]
-        tailEntList = []
-        # Get head and tail sentence positions
-        for relation in relationList:
-          if relation['fromID'] == headEnt['id']:
-            for entity in entityList:
-              if relation['toID'] == entity['id']:
-                tailEnt = entity
-                limitList.append(tailEnt['end'])
-                tailEntList.append({'id':tailEnt['id'], 'text':tailEnt['text'], 'start':tailEnt['start'], 'end':tailEnt['end'], 'tag':tailEnt["tag"], 'enttype':tailEnt["type"], 'reltype':relation['type']})
-              else: continue
+    for n, fil in enumerate(self.fileList):
+      print(f"File {n}/{len(self.fileList)} complete ({fil})")
+      # Get document ID
+      docID = fil.replace(".xml","")
+      # Get file path
+      filePath = self.dirPath + fil
+      # Read XML
+      text, tags = self.loadXML(filePath)
+      # Identify header dates
+      header = ' '.join(text.strip().splitlines()[0:4])
+      # Remove breaklines for accurate character splitting
+      text = text.replace("\n", " ")
+      # Get event, tlink and context lists from file
+      eventList, tlinkList = self.loadFile(filePath)
+      contextList = [
+          {"text":self.add_header(header, context.group(0)).strip(),
+           "start":context.start(),
+           "end":context.end()}
+          for context in re.finditer(f".{{{minLength},{maxLength}}}", text)]
+      # Classify events into head and tail lists
+      headIDList = list(set([tlink['fromID'] for tlink in tlinkList]))
+      tailIDList = list(set([tlink['toID'] for tlink in tlinkList]))
+      headEventList = [event for id in headIDList for event in eventList if event['id'] == id]
+      # Sort list by appearance order
+      headEventList = sorted(headEventList, key=lambda event:event['start'])
+      tripletList = []
+      
+      # Get tail for each head and compile into dictionary
+      for head in headEventList:
+        tailEventList = []
+        limitList = []
+        limitList.append(head['start'])
+        limitList.append(head['end'])
+        # Get tail(s) for each head
+        for tlink in tlinkList:
+          if tlink['fromID'] == head['id']:
+            if tlink['tlinktype'] == 'TL': # Count limits for TLINKRELs
+              for event in eventList:
+                if event['id'] == tlink['toID']:
+                  tail = event
+                  limitList.append(tail['start'])
+                  limitList.append(tail['end'])
+                  tailEventList.append({'id':tail['id'], 'text':tail['text'], 'start':tail['start'], 'end':tail['end'], 'tag':tail['tag'], 'enttype':tail['type'], 'reltype':tlink['reltype']})
+                else: continue
+            if tlink['tlinktype'] == 'SECTIME': # Do not count limits for SECTIMERELs
+              for event in eventList:
+                if event['id'] == tlink['toID']:
+                  tail = event
+                  tailEventList.append({'id':tail['id'], 'text':tail['text'], 'start':tail['start'], 'end':tail['end'], 'tag':tail['tag'], 'enttype':tail['type'], 'reltype':tlink['reltype']})
+                else: continue
+            else: continue
           else: continue
         # Sort list by appearance order
-        tailEntList = sorted(tailEntList, key=lambda ent:ent['start']) 
-        # Get sentence character boundaries
-        sentIndList = []
-        for index, sent in enumerate(sentenceList):
-          if sent["start"] <= min(limitList) <= sent["end"]:
-            sentIndList.append(index)
-          elif sent["start"] <= max(limitList) <= sent["end"]:
-            sentIndList.append(index)
-          else: continue
-        # Get context and triplets
-        context = [sent["text"] for sent in sentenceList[min(sentIndList):max(sentIndList)+1]]
-        context = " ".join(context)
-        triplet = self.extractTriplet(headEnt, tailEntList)
+        tailEventList = sorted(tailEventList, key=lambda event:event['start'])
+        # Compile dictionary
+        tripletList.append({'start':min(limitList), 'end':max(limitList), 'head':head, 'tail':tailEventList})
+      
+      # Get triplets within each context boundaries
+      for i, context in enumerate(contextList):
+        dataList = []
+        for triplet in tripletList:
+          if context["start"] <= triplet['start'] <= context["end"] and context["start"] <= triplet['end'] <= context["end"]:
+            dataList.append(triplet)
+          else:continue
+
+        # Get triplet sequence
+        tripletSeq = self.extractTripletSequence(dataList)
         # Merge
-        dictList.append({'text':context, 'triplet':triplet})
-    print(dictList)
-    return dictList
-  
-  def getDict(self):
-    """A function to get the dictionary of the dataset.
-    """
-    return {'data':self.dictList}
- 
+        if tripletSeq != "":
+          id = f"{docID}-{i}"
+          print(f"\nFROM {context['start']} TO {context['end']}\nTEXT: {context['text']}\nTRIPLET:{tripletSeq}")
+          dataDict.append({'id':id, 'context':context, 'triplet':tripletSeq})
+          lengthList.append(len(context['text']))
+          lengthList.append(len(tripletSeq))
+        else: continue
+    return dataDict
+
 # Set file paths
-dataDir = "/content/drive/MyDrive/Colab Notebooks/timexes_thesis/data/i2b2/"
-trainPath = dataDir + "trainset/"
-testPath = dataDir + "testset/"  
+dataDir = "/content/drive/MyDrive/Colab Notebooks/Thesis Model/data/"
+trainPath = dataDir + "TrainSet_MergedTLINK/"
+testPath = dataDir + "TestSet_MergedTLINK/"
+trialPath = dataDir + "TrialSet/"
+trainJsonPath = dataDir + "TrainJson_MergedTLINK.json"
+testJsonPath = dataDir + "TestJson_MergedTLINK.json"
 
-# Load model and tokenizer from HuggingFace or from checkpoint
-modelPath = "Babelscape/rebel-large"
-config = AutoConfig.from_pretrained(modelPath,
-                                    decoder_start_token_id = 0,
-                                    early_stopping = False,
-                                    no_repeat_ngram_size = 0,
-                                    dropout=0.1,
-                                    forced_bos_token_id=None)
-additional_special_tokens = ['<obj>', '<subj>', '<triplet>', '<head>', '</head>', '<tail>', '</tail>']
-tokenizer = AutoTokenizer.from_pretrained(modelPath, use_fast = True, additional_special_tokens = additional_special_tokens)
-config.vocab_size = tokenizer.vocab_size  # setting Tokenizer and Model to have same vocab size
-model = AutoModelForSeq2SeqLM.from_pretrained(modelPath, config=config, ignore_mismatched_sizes=True)
-  
-# Set function to tokenize text and labels
-max_length = 1024
-def tokenize(instance):
-  tokenized_instance = tokenizer(text = instance["text"], max_length=max_length, padding=True, truncation=True)
-  tokenized_instance["labels"] = tokenizer(text = instance["triplet"], max_length=max_length, padding=True, truncation=True)["input_ids"]
-  return tokenized_instance
+# Create dataset dictionary
+trainSet = i2b2Dataset(trainPath).loadDict()
 
-# Load dataset
-trainDS = i2b2Dataset(trainPath).loadTriplets()
-testDS = i2b2Dataset(testPath).loadTriplets()
+with open(trainJsonPath, 'w') as outfile:
+    for entry in trainSet:
+        json.dump(entry, outfile)
+        outfile.write('\n')
 
-# Tokenize dataset
-trainDSTK = trainDS.map(lambda instance: tokenize(instance), batched=True)
-testDSTK = testDS.map(lambda instance: tokenize(instance), batched=True)
+# Create dataset dictionary
+testSet = i2b2Dataset(testPath).loadDict()
 
-# Save encoded set
-#trainDSTK.save_to_disk(encodedTrainPath)
-#testDSTK.save_to_disk(encodedTestPath)
+with open(testJsonPath, 'w') as outfile:
+    for entry in testSet:
+        json.dump(entry, outfile)
+        outfile.write('\n')
