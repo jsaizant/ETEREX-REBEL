@@ -5,7 +5,7 @@ This repository contains the code for the modelling and evaluation of our BART-b
 
 The pre-trained model and part of the code are based on the REBEL framework (Cabot, 2021). The corpus was retrieved from the i2b2 2012 Temporal Relation Task (Sun, 2013).
 
-## Citation
+## References
 
 Huguet Cabot, P.-L., & Navigli, R. (2021). REBEL: Relation Extraction By End-to-end Language generation. Findings of the Association for Computational Linguistics: EMNLP 2021, 2370–2381. doi: https://doi.org/10.18653/v1/2021.findings-emnlp.204
 
