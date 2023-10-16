@@ -11,6 +11,16 @@ Huguet Cabot, P.-L., & Navigli, R. (2021). REBEL: Relation Extraction By End-to-
 
 Sun, W., Rumshisky, A., & Uzuner, O. (2013). Evaluating temporal relations in clinical text: 2012 i2b2 Challenge. In Journal of the American Medical Informatics Association (Vol. 20, Issue 5, pp. 806–813). Oxford University Press (OUP). https://doi.org/10.1136/amiajnl-2013-001628
 
+## Citation
+
+Please cite the paper if you use this resource in any way:
+
+@article{saiz2023end,
+  title={End-to-End Temporal Relation Extraction in the Clinical Domain [FULL]},
+  author={Saiz, Jos{\'e} Javier and Altuna, Bego{\~n}a},
+  year={2023}
+}
+
 ## License
 
 ETEREX-REBEL is licensed under the CC BY-SA-NC 4.0 license. The text of the license can be found [here](https://github.com/jsaizant/ETEREX-REBEL/blob/main/LICENSE.md).
